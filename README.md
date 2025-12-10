@@ -1,4 +1,4 @@
-# Nano Banana Image Studio (GenAI / Gemini)
+# Vision Prime
 This Streamlit app uses the Google GenAI SDK to talk to Gemini image models (e.g., Gemini 3 Pro Image / Nano Banana Pro).
 It supports text-to-image generation and text+image editing.
 
