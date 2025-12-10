@@ -1,0 +1,4 @@
+streamlit>=1.18
+Pillow>=9.0
+google-genai>=0.6.0
+requests>=2.28
