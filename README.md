@@ -27,5 +27,5 @@ It supports text-to-image generation and text+image editing.
 
 ## Notes
 - The `genai_client.py` wraps `google.genai` SDK and extracts images from `response.parts`.
-- For multi-turn editing, the SDK may return thought signatures. This simple wrapper does not surface thought signatures; if you need conversational state preservation, we can add a Conversation wrapper.
+- For multi-turn editing, the SDK may return thought signatures. This simple wrapper does not surface thought signatures; if you need conversational state preservation.
 - The app expects the GenAI SDK to be installed (`pip install google-genai`).

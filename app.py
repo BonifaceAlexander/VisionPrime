@@ -10,7 +10,8 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 st.title("VisionPrime")
 
 # Initialize GenAI client (reads GEMINI_API_KEY and GEMINI_BASE_URL from env or Streamlit secrets)
-client = GenAIClient()
+# Client initialization (Lazy)
+client = None
 
 # Session state
 if "history" not in st.session_state:
@@ -24,6 +25,24 @@ if "ui" not in st.session_state:
 # Sidebar
 with st.sidebar:
     st.header("Control Center")
+    
+    # API Key Configuration
+    # API Key Configuration
+    # Always show input, pre-fill with env var if exists
+    env_key = os.getenv("GEMINI_API_KEY", "")
+    api_key_input = st.text_input("Gemini API Key", type="password", value=env_key, placeholder="Enter your key...")
+    
+    # Prefer input over env var (though value=env_key makes them initially same)
+    api_key = api_key_input if api_key_input else env_key
+    
+    if api_key:
+        try:
+            client = GenAIClient(api_key=api_key)
+        except Exception as e:
+            st.error(f"Invalid API Key: {e}")
+    else:
+        st.warning("Please provide a Gemini API Key to use VisionPrime.")
+
     prompt = st.text_area("Prompt", height=140, placeholder="Describe your vision...")
     
     with st.expander("Style & Dimensions", expanded=True):
@@ -72,32 +91,35 @@ gen_tab, edit_tab, hist_tab = tabs
 with gen_tab:
     # st.subheader('Generate') # Clean look
     if st.session_state.get("generate_btn"):
-        with st.spinner("Dreaming up your image..."):
-            final_prompt = prompt + ' ' + ' '.join(build_shot_tags())
-            if enable_safety and 'nsfw' in final_prompt.lower():
-                st.error('Prompt blocked by client-side safety filter. Please remove explicit content.')
-            else:
-                aspect_tuple = ASPECT_PRESETS[aspect]
-                width, height = get_pixel_dimensions(aspect_tuple, quality)
-                t0 = time.time()
-                try:
-                    # Check for base image
-                    input_imgs = None
-                    if use_uploaded_as_base and uploaded:
-                        input_imgs = [Image.open(uploaded).convert('RGB')]
-                    
-                    imgs = client.generate_image(prompt=final_prompt, negative_prompt=neg, model='gemini-3-pro-image-preview',
-                                                 aspect_ratio=f"{aspect_tuple[0]}:{aspect_tuple[1]}", image_size=quality,
-                                                 guidance=guidance, seed=int(seed) if seed else None, num_images=nvar,
-                                                 input_images=input_imgs)
-                    for img in imgs:
-                        meta = {'prompt': final_prompt, 'negative_prompt': neg, 'aspect': aspect, 'quality': quality, 'style': style, 'guidance': guidance, 'seed': seed, 'input_image_used': bool(input_imgs), 'time': time.time()}
-                        st.session_state.history.insert(0, {'id': time.time(), 'image': img, 'meta': meta})
-                    elapsed = time.time() - t0
-                    st.success(f'Generated {len(imgs)} images in {elapsed:.1f}s')
-                    log_event('generate', {'count': len(imgs), 'width': width, 'height': height, 'has_input_image': bool(input_imgs), 'time_ms': int(elapsed*1000)})
-                except Exception as e:
-                    st.error(f'Generation failed: {e}')
+        if not client:
+            st.error("API Key is required. Please set GEMINI_API_KEY or enter it in the sidebar.")
+        else:
+            with st.spinner("Dreaming up your image..."):
+                final_prompt = prompt + ' ' + ' '.join(build_shot_tags())
+                if enable_safety and 'nsfw' in final_prompt.lower():
+                    st.error('Prompt blocked by client-side safety filter. Please remove explicit content.')
+                else:
+                    aspect_tuple = ASPECT_PRESETS[aspect]
+                    width, height = get_pixel_dimensions(aspect_tuple, quality)
+                    t0 = time.time()
+                    try:
+                        # Check for base image
+                        input_imgs = None
+                        if use_uploaded_as_base and uploaded:
+                            input_imgs = [Image.open(uploaded).convert('RGB')]
+                        
+                        imgs = client.generate_image(prompt=final_prompt, negative_prompt=neg, model='gemini-3-pro-image-preview',
+                                                     aspect_ratio=f"{aspect_tuple[0]}:{aspect_tuple[1]}", image_size=quality,
+                                                     guidance=guidance, seed=int(seed) if seed else None, num_images=nvar,
+                                                     input_images=input_imgs)
+                        for img in imgs:
+                            meta = {'prompt': final_prompt, 'negative_prompt': neg, 'aspect': aspect, 'quality': quality, 'style': style, 'guidance': guidance, 'seed': seed, 'input_image_used': bool(input_imgs), 'time': time.time()}
+                            st.session_state.history.insert(0, {'id': time.time(), 'image': img, 'meta': meta})
+                        elapsed = time.time() - t0
+                        st.success(f'Generated {len(imgs)} images in {elapsed:.1f}s')
+                        log_event('generate', {'count': len(imgs), 'width': width, 'height': height, 'has_input_image': bool(input_imgs), 'time_ms': int(elapsed*1000)})
+                    except Exception as e:
+                        st.error(f'Generation failed: {e}')
 
     cols = st.columns(3)
     for idx, item in enumerate(st.session_state.history[:9]):
@@ -118,34 +140,53 @@ with edit_tab:
     elif st.session_state.active is not None and st.session_state.history:
         base_img = st.session_state.history[st.session_state.active]['image']
     if base_img:
-        st.image(base_img, caption='Before', width=320)
-        brightness = st.slider('Brightness', 0.2, 2.0, 1.0)
-        contrast = st.slider('Contrast', 0.2, 2.0, 1.0)
-        saturation = st.slider('Saturation', 0.0, 2.0, 1.0)
-        apply_watermark = st.checkbox('Add watermark')
-        watermark_text = st.text_input('Watermark text', value='© MyBrand')
-        if st.button('Apply edits (local PIL)'):
-            edited = apply_filters(base_img, brightness=brightness, contrast=contrast, saturation=saturation)
-            if apply_watermark:
-                edited = add_watermark(edited, watermark_text)
-            st.session_state.history.insert(0, {'id': time.time(), 'image': edited, 'meta': {'edited_from': st.session_state.active}})
-            st.image(edited, caption='After', width=320)
+        col_orig, col_edit = st.columns(2)
+        with col_orig:
+            st.image(base_img, caption='Original Image', use_container_width=True)
+        
+        with col_edit:
+            st.info("Edited result will appear here")
+            
+        with st.expander("Local Adjustments (Brightness, Contrast, Watermark)", expanded=False):
+            b_col, c_col, s_col = st.columns(3)
+            with b_col: brightness = st.slider('Brightness', 0.2, 2.0, 1.0)
+            with c_col: contrast = st.slider('Contrast', 0.2, 2.0, 1.0)
+            with s_col: saturation = st.slider('Saturation', 0.0, 2.0, 1.0)
+            
+            apply_watermark = st.checkbox('Add watermark')
+            watermark_text = st.text_input('Watermark text', value='© VisionPrime')
+            
+            if st.button('Apply Local Edits'):
+                edited = apply_filters(base_img, brightness=brightness, contrast=contrast, saturation=saturation)
+                if apply_watermark:
+                    edited = add_watermark(edited, watermark_text)
+                st.session_state.history.insert(0, {'id': time.time(), 'image': edited, 'meta': {'edited_from': st.session_state.active}})
+                with col_edit:
+                    st.image(edited, caption='After (Local Edit)', use_container_width=True)
+                    st.success("Local edits applied!")
 
-        st.markdown('### Text-driven edit (GenAI edit endpoint)')
-        edit_instruction = st.text_area('What to change in the image?', height=80)
-        if st.button('Apply text edit via GenAI'):
-            try:
-                imgs = client.generate_image(prompt=edit_instruction, input_images=[base_img], model='gemini-3-pro-image-preview',
-                                             aspect_ratio=f"{aspect_tuple[0]}:{aspect_tuple[1]}", image_size=quality,
-                                             guidance=guidance, seed=int(seed) if seed else None, num_images=1)
-                if imgs:
-                    new_img = imgs[0]
-                    st.session_state.history.insert(0, {'id': time.time(), 'image': new_img, 'meta': {'prompt': edit_instruction}})
-                    st.success('Edit applied')
+        with st.expander("GenAI Magic Edit", expanded=True):
+            edit_instruction = st.text_area('Example: "Change dress to red"', height=80)
+            if st.button('Apply Generative Edit', type="primary"):
+                if not client:
+                    st.error("API Key is required.")
                 else:
-                    st.error('No image returned from edit call.')
-            except Exception as e:
-                st.error(f'Edit failed: {e}')
+                    try:
+                        aspect_tuple = ASPECT_PRESETS[aspect]
+                        with st.spinner("AI is editing your image..."):
+                            imgs = client.generate_image(prompt=edit_instruction, input_images=[base_img], model='gemini-3-pro-image-preview',
+                                                         aspect_ratio=f"{aspect_tuple[0]}:{aspect_tuple[1]}", image_size=quality,
+                                                         guidance=guidance, seed=int(seed) if seed else None, num_images=1)
+                        if imgs:
+                            new_img = imgs[0]
+                            st.session_state.history.insert(0, {'id': time.time(), 'image': new_img, 'meta': {'prompt': edit_instruction}})
+                            with col_edit:
+                                st.image(new_img, caption='After (GenAI Edit)', use_container_width=True)
+                                st.success('Edit applied successfully!')
+                        else:
+                            st.error('No image returned from edit call.')
+                    except Exception as e:
+                        st.error(f'Edit failed: {e}')
 
 # History tab
 with hist_tab:

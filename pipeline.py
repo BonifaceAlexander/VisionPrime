@@ -54,7 +54,12 @@ def add_watermark(img, text, opacity=180, margin=10, fontsize=24):
         font = ImageFont.truetype('DejaVuSans.ttf', fontsize)
     except:
         font = ImageFont.load_default()
-    text_w, text_h = d.textsize(text, font=font)
+    
+    # textsize is deprecated in Pillow 10+
+    left, top, right, bottom = d.textbbox((0,0), text, font=font)
+    text_w = right - left
+    text_h = bottom - top
+    
     x = base.width - text_w - margin
     y = base.height - text_h - margin
     d.text((x,y), text, fill=(255,255,255, opacity), font=font)
